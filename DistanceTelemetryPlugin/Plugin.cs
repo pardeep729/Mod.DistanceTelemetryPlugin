@@ -64,8 +64,7 @@ namespace DistanceTelemetryPlugin
         //Unity MonoBehaviour Functions
         private void Awake()
         {
-            TcpClient tClient = new TcpClient();
-
+            
             if (Instance == null)
             {
                 Instance = this;
