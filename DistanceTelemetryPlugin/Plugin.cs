@@ -12,6 +12,8 @@ using System;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Sockets;
+using System.Runtime.Serialization.Formatters.Binary;
 using UnityEngine;
 
 namespace DistanceTelemetryPlugin
@@ -22,13 +24,17 @@ namespace DistanceTelemetryPlugin
         //Mod Details
         private const string modGUID = "Distance.TelemetryPlugin";
         private const string modName = "Distance Telemetry Plugin";
-        private const string modVersion = "1.0.0";
+        private const string modVersion = "1.1.0";
 
         //Config Entry Settings
         public static string FilePrefixKey = "File Prefix";
+        public static string UdpHostKey = "Connection Host";
+        public static string UdpPortKey = "Connection Port";
 
         //Config Entries
         public static ConfigEntry<string> FilePrefix { get; set; }
+        public static ConfigEntry<string> UdpHost { get; set; }
+        public static ConfigEntry<int> UdpPort { get; set; }
 
         //Public Variables
         public bool active = false;
@@ -44,10 +50,12 @@ namespace DistanceTelemetryPlugin
         private Guid race_id;
         private JsonWriter writer = new JsonWriter();
         private LocalPlayerControlledCar localCar;
+        private NetworkStream udpStream;
         private PlayerEvents playerEvents;
         private Rigidbody car_rg;
         private Stopwatch sw = new Stopwatch();
         private TextWriter data_writer;
+        private UdpClient oClient = new UdpClient();
 
 
         //Other
@@ -57,6 +65,8 @@ namespace DistanceTelemetryPlugin
         //Unity MonoBehaviour Functions
         private void Awake()
         {
+            TcpClient tClient = new TcpClient();
+            
             if (Instance == null)
             {
                 Instance = this;
@@ -75,11 +85,24 @@ namespace DistanceTelemetryPlugin
                 "Telemetry",
                 new ConfigDescription("The name of the json file that the telemetry writes to"));
 
-            //This does not create a directory where intended (if at all), double check how custom cars writes it since it's done correctly(?) there.
-            string telemetryDirectory = fs.CreateDirectory("Telemetry");
-            FileStream fileStream = fs.CreateFile(Path.Combine(telemetryDirectory, $"{FilePrefix.Value}_{string.Format("{0:yyyy-MM-dd_HH-mm-ss}", DateTime.Now)}.jsonl"));
-            data_writer = new StreamWriter(fileStream);
-            Logger.LogInfo($"[Telemetry] Opening new filestream for {fileStream}...");
+            UdpHost = Config.Bind("General",
+                UdpHostKey,
+                "",
+                new ConfigDescription("The host name to connect to for streaming data over UDP (\"\" to disable UDP streaming)"));
+
+            UdpPort = Config.Bind("General",
+                UdpPortKey,
+                -1,
+                new ConfigDescription("The port number to connect to for streaming data over UDP (-1 to disable UDP streaming)"));
+
+            //Tries to connect to host, if it can't then it outputs the telemetry to the jsonl file.
+            if (!TryConnectToHost())
+            {
+                string telemetryDirectory = fs.CreateDirectory("Telemetry");
+                FileStream fileStream = fs.CreateFile(Path.Combine(telemetryDirectory, $"{FilePrefix.Value}_{string.Format("{0:yyyy-MM-dd_HH-mm-ss}", DateTime.Now)}.jsonl"));
+                data_writer = new StreamWriter(fileStream);
+                Logger.LogInfo($"[Telemetry] Opening new filestream for {fileStream}...");
+            }
 
             //Apply Patches (None to patch here!)
             Logger.LogInfo("Loaded!");
@@ -173,6 +196,37 @@ namespace DistanceTelemetryPlugin
                     ["Y"] = car_log.CarDirectives_.Rotation_.y,
                     ["Z"] = car_log.CarDirectives_.Rotation_.z
                 };
+                Dictionary<string, object> tire_fl = new Dictionary<string, object>
+                {
+                    ["Pos"] = car_log.CarStats_.WheelFL_.hubTrans_.position.y,
+                    ["Contact"] = car_log.CarStats_.WheelFL_.IsInContact_,
+                    ["Suspension"] = car_log.CarStats_.WheelFL_.SuspensionDistance_
+                };
+                Dictionary<string, object> tire_fr = new Dictionary<string, object>
+                {
+                    ["Pos"] = car_log.CarStats_.WheelFR_.hubTrans_.position.y,
+                    ["Contact"] = car_log.CarStats_.WheelFR_.IsInContact_,
+                    ["Suspension"] = car_log.CarStats_.WheelFR_.SuspensionDistance_
+                };
+                Dictionary<string, object> tire_bl = new Dictionary<string, object>
+                {
+                    ["Pos"] = car_log.CarStats_.WheelBL_.hubTrans_.position.y,
+                    ["Contact"] = car_log.CarStats_.WheelBL_.IsInContact_,
+                    ["Suspension"] = car_log.CarStats_.WheelBL_.SuspensionDistance_
+                };
+                Dictionary<string, object> tire_br = new Dictionary<string, object>
+                {
+                    ["Pos"] = car_log.CarStats_.WheelBR_.hubTrans_.position.y,
+                    ["Contact"] = car_log.CarStats_.WheelBR_.IsInContact_,
+                    ["Suspension"] = car_log.CarStats_.WheelBR_.SuspensionDistance_
+                };
+                Dictionary<string, object> tires = new Dictionary<string, object>
+                {
+                    ["TireFL"] = tire_fl,
+                    ["TireFR"] = tire_fr,
+                    ["TireBL"] = tire_bl,
+                    ["TireBR"] = tire_br
+                };
                 data["Pos"] = position;
                 data["Rot"] = rotation;
                 data["Vel"] = velocity;
@@ -185,6 +239,7 @@ namespace DistanceTelemetryPlugin
                 data["Wings"] = localCar.WingsActive_;
                 data["Has Wings"] = localCar.WingsEnabled_;
                 data["All Wheels Contacting"] = car_log.CarStats_.AllWheelsContacting_;
+                data["Tires"] = tires;
                 data["Drive Wheel AVG Rot Vel"] = car_log.CarStats_.DriveWheelAvgRotVel_;
                 data["Drive Wheel AVG RPM"] = car_log.CarStats_.DriveWheelAvgRPM_;
 
@@ -198,10 +253,41 @@ namespace DistanceTelemetryPlugin
             data["Sender_ID"] = instance_id.ToString("B");
             data["Race_ID"] = race_id.ToString("B");
 
-            writer.Settings.PrettyPrint = false;
-            writer.Write(data, data_writer);
-            data_writer.WriteLine();
-            data_writer.Flush();
+            //Checking whether or not it's connected to the host. Attempts a reconnect before continuing. 
+            if (!oClient.Client.Connected)
+            {
+                if (UdpPort.Value != -1 && UdpHost.Value != "")
+                {
+                    Logger.LogInfo("[Telemetry] Reconnecting...");
+                    if (TryConnectToHost())
+                    {
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            BinaryFormatter binFormatter = new BinaryFormatter();
+                            binFormatter.Serialize(ms, data);
+                            byte[] dicBytes = ms.ToArray();
+                            oClient.Send(dicBytes, dicBytes.Length);
+                        }
+                    }
+                }
+                else //Don't bother with connecting if the UDP values are default
+                {
+                    writer.Settings.PrettyPrint = false;
+                    writer.Write(data, data_writer);
+                    data_writer.WriteLine();
+                    data_writer.Flush();
+                }
+            }
+            else
+            {
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    BinaryFormatter binFormatter = new BinaryFormatter();
+                    binFormatter.Serialize(ms, data);
+                    byte[] dicBytes = ms.ToArray();
+                    oClient.Send(dicBytes, dicBytes.Length);
+                }
+            }
         }
 
         private void LocalVehicle_CheckpointPassed(CheckpointHit.Data eventData)
@@ -383,6 +469,8 @@ namespace DistanceTelemetryPlugin
             SettingChangedEventArgs settingChangedEventArgs = e as SettingChangedEventArgs;
 
             if (settingChangedEventArgs == null) return;
+
+            TryConnectToHost();
         }
 
         private void OnGamePaused(PauseToggled.Data eventData)
@@ -390,10 +478,6 @@ namespace DistanceTelemetryPlugin
             if (eventData.paused_)
             {
                 active = false;
-            }
-            else
-            {
-                active = true;
             }
         }
 
@@ -447,6 +531,28 @@ namespace DistanceTelemetryPlugin
             playerEvents.Subscribe(new InstancedEvent<Events.Player.Finished.Data>.Delegate(LocalVehicle_Finished));
             playerEvents.Subscribe(new InstancedEvent<Explode.Data>.Delegate(LocalVehicle_Exploded));
             playerEvents.Subscribe(new InstancedEvent<Horn.Data>.Delegate(LocalVehicle_Honked));
+        }
+
+        private bool TryConnectToHost()
+        {
+            if (UdpPort.Value != -1 && UdpHost.Value != "")
+            {
+                Logger.LogInfo($"[Telemetry] Connecting to {UdpHost.Value}:{UdpPort}...");
+                try
+                {
+                    oClient.Connect(UdpHost.Value, UdpPort.Value);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogInfo($"[Telemetry] Failed to Connect to {UdpHost.Value}:{UdpPort}...");
+                    Logger.LogInfo(ex);
+                    Logger.LogInfo("\nTelemetry Disabled, if you want to write to the jsonl file, please set the host to an empty string and the port to -1 \n[Telemetry]");
+                    return false;
+                }
+                Logger.LogInfo("[Telemetry] Connected!");
+                return true;
+            }
+            return false;
         }
     }
 }
