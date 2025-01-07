@@ -154,7 +154,7 @@ namespace DistanceTelemetryPlugin
                     Mode = G.Sys.GameManager_.ModeName_,
                     RealTime = DateTime.Now,
                     Time = sw.Elapsed.TotalSeconds,
-                    Event = "update",
+                    Event = TelemetryEvent.Update,
                     Speed_KPH = localCar.carStats_.GetKilometersPerHour(),
                     Speed_MPH = localCar.carStats_.GetMilesPerHour(),
                     Heat = car_log.heat_,
@@ -263,7 +263,7 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = "checkpoint",
+                Event = TelemetryEvent.Checkpoint,
                 CheckpointIndex = eventData.handle_,
                 TrackT = eventData.trackT_
             };
@@ -278,7 +278,7 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = "collision",
+                Event = TelemetryEvent.Collision,
                 Target = eventData.impactedCollider_.name,
                 Pos = new Vector3(eventData.pos_.x, eventData.pos_.y, eventData.pos_.z),
                 Speed = eventData.speed_
@@ -294,7 +294,7 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = "destroyed",
+                Event = TelemetryEvent.Destroyed,
                 Cause = eventData.causeOfDeath
             };
             Callback(data);
@@ -308,7 +308,7 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = "exploded",
+                Event = TelemetryEvent.Exploded,
                 Cause = eventData.causeOfDeath
             };
             Callback(data);
@@ -322,7 +322,7 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = "honked",
+                Event = TelemetryEvent.Honked,
                 Power = eventData.hornPercent_,
                 Pos = new Vector3(eventData.position_.x, eventData.position_.y, eventData.position_.z)
             };
@@ -337,7 +337,7 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = "finish",
+                Event = TelemetryEvent.Finish,
                 FinalTime = eventData.finishData_,
                 FinishType = eventData.finishType_
             };
@@ -352,7 +352,7 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = "jump"
+                Event = TelemetryEvent.Jump
             };
             Callback(data);
         }
@@ -365,7 +365,7 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = "respawn",
+                Event = TelemetryEvent.Respawn,
                 Pos = new Vector3(eventData.position_.x, eventData.position_.y, eventData.position_.z),
                 Rot = new Vector3(eventData.rotation_.eulerAngles.x, eventData.rotation_.eulerAngles.y, eventData.rotation_.eulerAngles.z)
             };
@@ -380,7 +380,7 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = "split",
+                Event = TelemetryEvent.Split,
                 Penetration = eventData.penetration,
                 SeparationSpeed = eventData.separationSpeed
             };
@@ -395,7 +395,7 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = "trick",
+                Event = TelemetryEvent.Trick,
                 Points = eventData.points_,
                 Cooldown = eventData.cooldownAmount_,
                 Grind = eventData.grindMeters_,
@@ -437,7 +437,7 @@ namespace DistanceTelemetryPlugin
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
-                Event = "start",
+                Event = TelemetryEvent.Start,
                 Time = sw.Elapsed.TotalSeconds
             };
             Callback(data);
@@ -451,7 +451,7 @@ namespace DistanceTelemetryPlugin
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
-                Event = "end",
+                Event = TelemetryEvent.End,
                 Time = sw.Elapsed.TotalSeconds
             };
             sw.Stop();
@@ -496,5 +496,6 @@ namespace DistanceTelemetryPlugin
             return false;
         }
     }
+    
     
 }

@@ -8,16 +8,33 @@ using UnityEngine;
 
 namespace DistanceTelemetryPlugin
 {
+    public enum TelemetryEvent
+    {
+        Update,
+        Checkpoint,
+        Collision,
+        Destroyed,
+        Exploded,
+        Honked,
+        Finish,
+        Jump,
+        Respawn,
+        Split,
+        Trick,
+        Start,
+        End
+    }
+
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public struct TelemetryData
     {
-        public fixed char Sender_ID[38];
-        public fixed char Race_ID[38];
+        public string Sender_ID;
+        public string Race_ID;
         public string Level;
         public string Mode;
         public DateTime RealTime;
         public double Time;
-        public string Event;
+        public TelemetryEvent Event;
         public float Speed_KPH;
         public float Speed_MPH;
         public float Heat;
