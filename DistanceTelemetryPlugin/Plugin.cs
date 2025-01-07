@@ -10,12 +10,9 @@ using Events.RaceEnd;
 using JsonFx.Json;
 using System;
 using System.Diagnostics;
-using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
-using System.Runtime.Serialization.Formatters.Binary;
 using UnityEngine;
-using HarmonyLib;
 
 namespace DistanceTelemetryPlugin
 {
@@ -50,6 +47,7 @@ namespace DistanceTelemetryPlugin
         private Guid instance_id;
         private Guid race_id;
         private JsonWriter writer = new JsonWriter();
+        
         private LocalPlayerControlledCar localCar;
         private NetworkStream udpStream;
         private PlayerEvents playerEvents;
@@ -154,7 +152,6 @@ namespace DistanceTelemetryPlugin
                     Mode = G.Sys.GameManager_.ModeName_,
                     RealTime = DateTime.Now,
                     Time = sw.Elapsed.TotalSeconds,
-                    Event = TelemetryEvent.Update,
                     Speed_KPH = localCar.carStats_.GetKilometersPerHour(),
                     Speed_MPH = localCar.carStats_.GetMilesPerHour(),
                     Heat = car_log.heat_,
@@ -226,12 +223,15 @@ namespace DistanceTelemetryPlugin
                     Logger.LogInfo("[Telemetry] Reconnecting...");
                     if (TryConnectToHost())
                     {
-                        using (MemoryStream ms = new MemoryStream())
+                        using (var ms = new MemoryStream())
                         {
-                            BinaryFormatter binFormatter = new BinaryFormatter();
-                            binFormatter.Serialize(ms, data);
-                            byte[] dicBytes = ms.ToArray();
-                            oClient.Send(dicBytes, dicBytes.Length);
+                            using (var bw = new BinaryWriter(ms))
+                            {
+                                bw.Write(writer.Write(data));
+
+                                byte[] dicBytes = ms.ToArray();                                
+                                oClient.Send(dicBytes, dicBytes.Length);
+                            }
                         }
                     }
                 }
@@ -241,30 +241,33 @@ namespace DistanceTelemetryPlugin
                     writer.Write(data, data_writer);
                     data_writer.WriteLine();
                     data_writer.Flush();
+
                 }
             }
             else
             {
-                using (MemoryStream ms = new MemoryStream())
+                using (var ms = new MemoryStream())
                 {
-                    BinaryFormatter binFormatter = new BinaryFormatter();
-                    binFormatter.Serialize(ms, data);
-                    byte[] dicBytes = ms.ToArray();
-                    oClient.Send(dicBytes, dicBytes.Length);
+                    using (var bw = new BinaryWriter(ms))
+                    {
+                        bw.Write(writer.Write(data));
+
+                        byte[] dicBytes = ms.ToArray();
+                        oClient.Send(dicBytes, dicBytes.Length);
+                    }
                 }
             }
         }
 
         private void LocalVehicle_CheckpointPassed(CheckpointHit.Data eventData)
         {
-            data = new Telemetry
+            data = new CheckpointTelmetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = TelemetryEvent.Checkpoint,
-                CheckpointIndex = eventData.handle_,
+                CheckpointIndex = eventData.handle_.id_,
                 TrackT = eventData.trackT_
             };
             Callback(data);
@@ -272,13 +275,12 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Collided(Impact.Data eventData)
         {
-            data = new Telemetry
+            data = new CollisionTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = TelemetryEvent.Collision,
                 Target = eventData.impactedCollider_.name,
                 Pos = new Vector3(eventData.pos_.x, eventData.pos_.y, eventData.pos_.z),
                 Speed = eventData.speed_
@@ -288,13 +290,12 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Destroyed(Death.Data eventData)
         {
-            data = new Telemetry
+            data = new ExplodedDestroyedTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = TelemetryEvent.Destroyed,
                 Cause = eventData.causeOfDeath
             };
             Callback(data);
@@ -302,13 +303,12 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Exploded(Explode.Data eventData)
         {
-            data = new Telemetry
+            data = new ExplodedDestroyedTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = TelemetryEvent.Exploded,
                 Cause = eventData.causeOfDeath
             };
             Callback(data);
@@ -316,13 +316,12 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Honked(Horn.Data eventData)
         {
-            data = new Telemetry
+            data = new HonkedTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = TelemetryEvent.Honked,
                 Power = eventData.hornPercent_,
                 Pos = new Vector3(eventData.position_.x, eventData.position_.y, eventData.position_.z)
             };
@@ -331,13 +330,12 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Finished(Events.Player.Finished.Data eventData)
         {
-            data = new Telemetry
+            data = new FinishTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = TelemetryEvent.Finish,
                 FinalTime = eventData.finishData_,
                 FinishType = eventData.finishType_
             };
@@ -346,26 +344,24 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Jumped(Jump.Data eventData)
         {
-            data = new Telemetry
+            data = new JumpTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
-                Event = TelemetryEvent.Jump
             };
             Callback(data);
         }
 
         private void LocalVehicle_Respawn(CarRespawn.Data eventData)
         {
-            data = new Telemetry
+            data = new RespawnTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
-                Time = sw.Elapsed.TotalSeconds,
-                Event = TelemetryEvent.Respawn,
+                Time = sw.Elapsed.TotalSeconds,                
                 Pos = new Vector3(eventData.position_.x, eventData.position_.y, eventData.position_.z),
                 Rot = new Vector3(eventData.rotation_.eulerAngles.x, eventData.rotation_.eulerAngles.y, eventData.rotation_.eulerAngles.z)
             };
@@ -374,13 +370,12 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Split(Split.Data eventData)
         {
-            data = new Telemetry
+            data = new SplitTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
-                Time = sw.Elapsed.TotalSeconds,
-                Event = TelemetryEvent.Split,
+                Time = sw.Elapsed.TotalSeconds,                
                 Penetration = eventData.penetration,
                 SeparationSpeed = eventData.separationSpeed
             };
@@ -389,13 +384,12 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_TrickComplete(TrickComplete.Data eventData)
         {
-            data = new Telemetry
+            data = new TrickTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
-                Time = sw.Elapsed.TotalSeconds,
-                Event = TelemetryEvent.Trick,
+                Time = sw.Elapsed.TotalSeconds,                
                 Points = eventData.points_,
                 Cooldown = eventData.cooldownAmount_,
                 Grind = eventData.grindMeters_,
@@ -432,12 +426,11 @@ namespace DistanceTelemetryPlugin
             }
             sw = Stopwatch.StartNew();
             active = true;
-            data = new Telemetry
+            data = new RaceStartedTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
-                Event = TelemetryEvent.Start,
                 Time = sw.Elapsed.TotalSeconds
             };
             Callback(data);
@@ -446,12 +439,11 @@ namespace DistanceTelemetryPlugin
         private void RaceEnded(LocalCarHitFinish.Data eventData)
         {
             Log.LogInfo("{Telemetry] Finished...");
-            data = new Telemetry
+            data = new RaceEndedTelemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
-                Event = TelemetryEvent.End,
                 Time = sw.Elapsed.TotalSeconds
             };
             sw.Stop();
