@@ -45,7 +45,7 @@ namespace DistanceTelemetryPlugin
         private bool has_wings;
         private bool wings;
         private CarLogic car_log;
-        private TelemetryData data;
+        private Telemetry data;
         private FileSystem fs = new FileSystem();
         private Guid instance_id;
         private Guid race_id;
@@ -148,7 +148,7 @@ namespace DistanceTelemetryPlugin
                 car_rg = localCar.GetComponent<Rigidbody>();
                 car_log = localCar.carLogic_;
 
-                data = new TelemetryData
+                data = new UpdateTelemetry
                 {
                     Level = G.Sys.GameManager_.LevelName_,
                     Mode = G.Sys.GameManager_.ModeName_,
@@ -213,7 +213,7 @@ namespace DistanceTelemetryPlugin
         }
 
         //Normal Functions
-        public void Callback(TelemetryData data)
+        public void Callback(Telemetry data)
         {
             data.Sender_ID = instance_id.ToString("B");
             data.Race_ID = race_id.ToString("B");
@@ -257,7 +257,7 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_CheckpointPassed(CheckpointHit.Data eventData)
         {
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -272,7 +272,7 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Collided(Impact.Data eventData)
         {
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -288,7 +288,7 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Destroyed(Death.Data eventData)
         {
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -302,7 +302,7 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Exploded(Explode.Data eventData)
         {
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -316,7 +316,7 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Honked(Horn.Data eventData)
         {
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -331,7 +331,7 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Finished(Events.Player.Finished.Data eventData)
         {
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -346,7 +346,7 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Jumped(Jump.Data eventData)
         {
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -359,7 +359,7 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Respawn(CarRespawn.Data eventData)
         {
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -374,7 +374,7 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_Split(Split.Data eventData)
         {
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -389,7 +389,7 @@ namespace DistanceTelemetryPlugin
 
         private void LocalVehicle_TrickComplete(TrickComplete.Data eventData)
         {
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -432,7 +432,7 @@ namespace DistanceTelemetryPlugin
             }
             sw = Stopwatch.StartNew();
             active = true;
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -446,7 +446,7 @@ namespace DistanceTelemetryPlugin
         private void RaceEnded(LocalCarHitFinish.Data eventData)
         {
             Log.LogInfo("{Telemetry] Finished...");
-            data = new TelemetryData
+            data = new Telemetry
             {
                 Level = G.Sys.GameManager_.LevelName_,
                 Mode = G.Sys.GameManager_.ModeName_,
@@ -458,6 +458,9 @@ namespace DistanceTelemetryPlugin
             active = false;
             Callback(data);
         }
+
+              
+        
 
         private void SubscribeToEvents()
         {
@@ -472,6 +475,20 @@ namespace DistanceTelemetryPlugin
             playerEvents.Subscribe(new InstancedEvent<Events.Player.Finished.Data>.Delegate(LocalVehicle_Finished));
             playerEvents.Subscribe(new InstancedEvent<Explode.Data>.Delegate(LocalVehicle_Exploded));
             playerEvents.Subscribe(new InstancedEvent<Horn.Data>.Delegate(LocalVehicle_Honked));
+        }
+
+        private void UnSubscribeFromEvents()
+        {
+            playerEvents.Unsubscribe(new InstancedEvent<TrickComplete.Data>.Delegate(LocalVehicle_TrickComplete));
+            playerEvents.Unsubscribe(new InstancedEvent<Split.Data>.Delegate(LocalVehicle_Split));
+            playerEvents.Unsubscribe(new InstancedEvent<CheckpointHit.Data>.Delegate(LocalVehicle_CheckpointPassed));
+            playerEvents.Unsubscribe(new InstancedEvent<Impact.Data>.Delegate(LocalVehicle_Collided));
+            playerEvents.Unsubscribe(new InstancedEvent<Death.Data>.Delegate(LocalVehicle_Destroyed));
+            playerEvents.Unsubscribe(new InstancedEvent<Jump.Data>.Delegate(LocalVehicle_Jumped));
+            playerEvents.Unsubscribe(new InstancedEvent<CarRespawn.Data>.Delegate(LocalVehicle_Respawn));
+            playerEvents.Unsubscribe(new InstancedEvent<Events.Player.Finished.Data>.Delegate(LocalVehicle_Finished));
+            playerEvents.Unsubscribe(new InstancedEvent<Explode.Data>.Delegate(LocalVehicle_Exploded));
+            playerEvents.Unsubscribe(new InstancedEvent<Horn.Data>.Delegate(LocalVehicle_Honked));
         }
 
         private bool TryConnectToHost()
