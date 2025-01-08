@@ -1,4 +1,5 @@
-﻿using JsonFx.Json;
+﻿using Newtonsoft.Json.Converters;
+using Newtonsoft.Json;
 
 using System;
 
@@ -57,6 +58,7 @@ namespace DistanceTelemetryPlugin
     {
         public string Sender_ID;
         public string Race_ID;
+        [JsonConverter(typeof(StringEnumConverter))]
         public abstract TelemetryEvent Event { get; }
         public string Level;
         public string Mode;
@@ -94,6 +96,7 @@ namespace DistanceTelemetryPlugin
 
     public class CheckpointTelmetry : Telemetry 
     {
+
         public override TelemetryEvent Event => TelemetryEvent.Checkpoint;
         public int CheckpointIndex;
         public float TrackT;
@@ -112,7 +115,8 @@ namespace DistanceTelemetryPlugin
     public class ExplodedDestroyedTelemetry : Telemetry
     {
         public override TelemetryEvent Event => TelemetryEvent.Exploded;
-        
+
+        [JsonConverter(typeof(StringEnumConverter))]
         public Cause Cause;
     }
 

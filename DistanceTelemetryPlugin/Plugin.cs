@@ -7,8 +7,11 @@ using Events.Game;
 using Events.GameMode;
 using Events.Player;
 using Events.RaceEnd;
-using JsonFx.Json;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
+
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
@@ -17,12 +20,12 @@ using UnityEngine;
 namespace DistanceTelemetryPlugin
 {
     [BepInPlugin(modGUID, modName, modVersion)]
-    public sealed class Mod : BaseUnityPlugin
+    public sealed class Mod : BaseUnityPlugin, IDisposable
     {
         //Mod Details
         private const string modGUID = "Distance.TelemetryPlugin";
         private const string modName = "Distance Telemetry Plugin";
-        private const string modVersion = "1.1.0";
+        private const string modVersion = "1.2.0";
 
         //Config Entry Settings
         public static string FilePrefixKey = "File Prefix";
@@ -42,20 +45,33 @@ namespace DistanceTelemetryPlugin
         private CarLogic car_log;
         private Telemetry data;
         private FileSystem fs = new FileSystem();
+        FileStream fileStream;
+
+
+
         private Guid instance_id;
         private Guid race_id;
-        private JsonWriter writer = new JsonWriter();
+        
         private LocalPlayerControlledCar localCar;
         private PlayerEvents playerEvents;
         private Rigidbody car_rg;
-        private Stopwatch sw = new Stopwatch();
+        private Stopwatch sw;
         private TextWriter data_writer;
-        private UdpClient oClient = new UdpClient();
+        private UdpClient udpClient;
 
 
         //Other
-        public static ManualLogSource Log = new ManualLogSource(modName);
+        public static ManualLogSource Log;
         public static Mod Instance;
+
+        
+        public Mod()
+        {
+            udpClient = new UdpClient();
+            sw = new Stopwatch();
+            Log = new ManualLogSource(modName);
+            
+        }
 
         //Unity MonoBehaviour Functions
         private void Awake()
@@ -66,12 +82,12 @@ namespace DistanceTelemetryPlugin
                 Instance = this;
             }
 
-            writer.Settings.PrettyPrint = true;
+            
             instance_id = Guid.NewGuid();
             Log = BepInEx.Logging.Logger.CreateLogSource(modGUID);
             Logger.LogInfo("Thanks for using the Distance Telemtry Plugin!");
             Logger.LogInfo("[Telemetry] Initializing...");
-            Logger.LogInfo($"[Telemetry] Instance ID {instance_id.ToString("B")}...");
+            Logger.LogInfo($"[Telemetry] Instance ID {instance_id:B}...");
 
             //Config Setup
             FilePrefix = Config.Bind("General",
@@ -82,19 +98,25 @@ namespace DistanceTelemetryPlugin
             UdpHost = Config.Bind("General",
                 UdpHostKey,
                 "",
-                new ConfigDescription("The host name to connect to for streaming data over UDP (\"\" to disable UDP streaming)"));
+                new ConfigDescription("The host name to connect to for streaming data over UDP (\"\" to disable UDP streaming, \"127.0.0.1\" for localhost)"));
 
             UdpPort = Config.Bind("General",
                 UdpPortKey,
-                -1,
-                new ConfigDescription("The port number to connect to for streaming data over UDP (-1 to disable UDP streaming)"));
+                12345,
+                new ConfigDescription("The port number to connect to for streaming data over UDP (-1 to disable UDP streaming, defaults to 12345)"));
 
             //Tries to connect to host, if it can't then it outputs the telemetry to the jsonl file.
             if (!TryConnectToHost())
             {
                 string telemetryDirectory = fs.CreateDirectory("Telemetry");
-                FileStream fileStream = fs.CreateFile(Path.Combine(telemetryDirectory, $"{FilePrefix.Value}_{string.Format("{0:yyyy-MM-dd_HH-mm-ss}", DateTime.Now)}.jsonl"));
+
+                var logFIle = Path.Combine(telemetryDirectory, $"{FilePrefix.Value}_{string.Format("{0:yyyy-MM-dd_HH-mm-ss}", DateTime.Now)}.jsonl");
+                Log.LogInfo($"[Telemetry] Writing to {logFIle}...");
+                
+                fileStream = fs.CreateFile(logFIle);
+
                 data_writer = new StreamWriter(fileStream);
+                
                 Logger.LogInfo($"[Telemetry] Opening new filestream for {fileStream}...");
             }
 
@@ -111,26 +133,22 @@ namespace DistanceTelemetryPlugin
 
         private void OnDisable()
         {
-            Logger.LogInfo("Unsubscribing to events...");
+            
             StaticEvent<LocalCarHitFinish.Data>.Unsubscribe(new StaticEvent<LocalCarHitFinish.Data>.Delegate(RaceEnded));
             StaticEvent<Go.Data>.Unsubscribe(new StaticEvent<Go.Data>.Delegate(RaceStarted));
             StaticEvent<PauseToggled.Data>.Unsubscribe(new StaticEvent<PauseToggled.Data>.Delegate(OnGamePaused));
-            playerEvents.Unsubscribe(new InstancedEvent<TrickComplete.Data>.Delegate(LocalVehicle_TrickComplete));
-            playerEvents.Unsubscribe(new InstancedEvent<Split.Data>.Delegate(LocalVehicle_Split));
-            playerEvents.Unsubscribe(new InstancedEvent<CheckpointHit.Data>.Delegate(LocalVehicle_CheckpointPassed));
-            playerEvents.Unsubscribe(new InstancedEvent<Impact.Data>.Delegate(LocalVehicle_Collided));
-            playerEvents.Unsubscribe(new InstancedEvent<Death.Data>.Delegate(LocalVehicle_Destroyed));
-            playerEvents.Unsubscribe(new InstancedEvent<Jump.Data>.Delegate(LocalVehicle_Jumped));
-            playerEvents.Unsubscribe(new InstancedEvent<CarRespawn.Data>.Delegate(LocalVehicle_Respawn));
-            playerEvents.Unsubscribe(new InstancedEvent<Events.Player.Finished.Data>.Delegate(LocalVehicle_Finished));
-            playerEvents.Unsubscribe(new InstancedEvent<Explode.Data>.Delegate(LocalVehicle_Exploded));
-            playerEvents.Unsubscribe(new InstancedEvent<Horn.Data>.Delegate(LocalVehicle_Honked));
+            UnSubscribeFromEvents();
         }
 
         private void FixedUpdate()
         {
             if (sw.IsRunning && active)
             {
+                if(localCar == null)
+                {
+                    Logger.LogInfo("Local Car is null, trying to find it...");
+                }
+
                 if (!localCar.ExistsAndIsEnabled())
                 {
                     localCar = G.Sys.PlayerManager_.localPlayers_[0].playerData_.localCar_;
@@ -211,46 +229,31 @@ namespace DistanceTelemetryPlugin
             data.Sender_ID = instance_id.ToString("B");
             data.Race_ID = race_id.ToString("B");
 
+            var json = JsonConvert.SerializeObject(data,new JsonSerializerSettings { Converters = new[] { new StringEnumConverter() }, ReferenceLoopHandling = ReferenceLoopHandling.Ignore });
+
             //Checking whether or not it's connected to the host. Attempts a reconnect before continuing. 
-            if (!oClient.Client.Connected)
+            if (udpClient.Client.Connected)
             {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+                udpClient.Send(bytes, bytes.Length);
+            }
+            else
+            {
+
                 if (UdpPort.Value != -1 && UdpHost.Value != "")
                 {
                     Logger.LogInfo("[Telemetry] Reconnecting...");
                     if (TryConnectToHost())
                     {
-                        using (var ms = new MemoryStream())
-                        {
-                            using (var bw = new BinaryWriter(ms))
-                            {
-                                bw.Write(writer.Write(data));
-
-                                byte[] dicBytes = ms.ToArray();                                
-                                oClient.Send(dicBytes, dicBytes.Length);
-                            }
-                        }
+                        var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+                        udpClient.Send(bytes, bytes.Length);
                     }
                 }
-                else //Don't bother with connecting if the UDP values are default
+                else if (data_writer != null && (fileStream?.CanWrite ?? false)) //Write to the file
                 {
-                    writer.Settings.PrettyPrint = false;
-                    writer.Write(data, data_writer);
-                    data_writer.WriteLine();
+                    data_writer.WriteLine(json);                    
                     data_writer.Flush();
 
-                }
-            }
-            else
-            {
-                using (var ms = new MemoryStream())
-                {
-                    using (var bw = new BinaryWriter(ms))
-                    {
-                        bw.Write(writer.Write(data));
-
-                        byte[] dicBytes = ms.ToArray();
-                        oClient.Send(dicBytes, dicBytes.Length);
-                    }
                 }
             }
         }
@@ -487,7 +490,7 @@ namespace DistanceTelemetryPlugin
                 Logger.LogInfo($"[Telemetry] Connecting to {UdpHost.Value}:{UdpPort}...");
                 try
                 {
-                    oClient.Connect(UdpHost.Value, UdpPort.Value);
+                    udpClient.Connect(UdpHost.Value, UdpPort.Value);
                 }
                 catch (Exception ex)
                 {
@@ -500,6 +503,22 @@ namespace DistanceTelemetryPlugin
                 return true;
             }
             return false;
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                fileStream?.Dispose();
+                udpClient?.Close();
+                data_writer?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[Telemetry] Failed to dispose of filestream...");
+                Logger.LogError(ex);
+
+            }
         }
     }
     
