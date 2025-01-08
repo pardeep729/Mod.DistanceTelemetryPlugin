@@ -74,7 +74,8 @@ namespace DistanceTelemetryPlugin
         public float Speed_MPH;
         public float Heat;
         public Vector3 Pos;
-        public Vector3 Rot;
+        public Quaternion Rot;
+        public Vector3 EulRot;
         public Vector3 Vel;
         public Vector3 AngVel;
         public Inputs Inputs;
@@ -149,7 +150,8 @@ namespace DistanceTelemetryPlugin
     {
         public override TelemetryEvent Event => TelemetryEvent.Respawn;
         public Vector3 Pos;
-        public Vector3 Rot;
+        public Quaternion Rot;
+        public Vector3 EulRot;
     }
 
     public class SplitTelemetry : Telemetry

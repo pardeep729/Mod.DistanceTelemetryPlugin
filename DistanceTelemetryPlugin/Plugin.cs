@@ -39,17 +39,13 @@ namespace DistanceTelemetryPlugin
         public StreamWriter logFile;
 
         //Private Variables
-        private bool has_wings;
-        private bool wings;
         private CarLogic car_log;
         private Telemetry data;
         private FileSystem fs = new FileSystem();
         private Guid instance_id;
         private Guid race_id;
         private JsonWriter writer = new JsonWriter();
-        
         private LocalPlayerControlledCar localCar;
-        private NetworkStream udpStream;
         private PlayerEvents playerEvents;
         private Rigidbody car_rg;
         private Stopwatch sw = new Stopwatch();
@@ -154,10 +150,11 @@ namespace DistanceTelemetryPlugin
                     Speed_KPH = localCar.carStats_.GetKilometersPerHour(),
                     Speed_MPH = localCar.carStats_.GetMilesPerHour(),
                     Heat = car_log.heat_,
-                    Pos = new Vector3(localCar.transform.position.x, localCar.transform.position.y, localCar.transform.position.z),
-                    Rot = new Vector3(localCar.transform.rotation.x, localCar.transform.rotation.y, localCar.transform.rotation.z),
-                    Vel = new Vector3(car_rg.velocity.x, car_rg.velocity.y, car_rg.velocity.z),
-                    AngVel = new Vector3(car_rg.angularVelocity.x, car_rg.angularVelocity.y, car_rg.angularVelocity.z),
+                    Pos = localCar.transform.position,
+                    Rot = localCar.transform.rotation,
+                    EulRot = localCar.transform.rotation.eulerAngles,
+                    Vel = car_rg.velocity,
+                    AngVel = car_rg.angularVelocity,
                     Inputs = new Inputs
                     {
                         Boost = car_log.CarDirectives_.Boost_,
@@ -281,7 +278,7 @@ namespace DistanceTelemetryPlugin
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
                 Target = eventData.impactedCollider_.name,
-                Pos = new Vector3(eventData.pos_.x, eventData.pos_.y, eventData.pos_.z),
+                Pos = eventData.pos_,
                 Speed = eventData.speed_
             };
             Callback(data);
@@ -322,7 +319,7 @@ namespace DistanceTelemetryPlugin
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,
                 Power = eventData.hornPercent_,
-                Pos = new Vector3(eventData.position_.x, eventData.position_.y, eventData.position_.z)
+                Pos = eventData.position_
             };
             Callback(data);
         }
@@ -361,8 +358,9 @@ namespace DistanceTelemetryPlugin
                 Mode = G.Sys.GameManager_.ModeName_,
                 RealTime = DateTime.Now,
                 Time = sw.Elapsed.TotalSeconds,                
-                Pos = new Vector3(eventData.position_.x, eventData.position_.y, eventData.position_.z),
-                Rot = new Vector3(eventData.rotation_.eulerAngles.x, eventData.rotation_.eulerAngles.y, eventData.rotation_.eulerAngles.z)
+                Pos = eventData.position_,
+                Rot = eventData.rotation_,
+                EulRot = eventData.rotation_.eulerAngles
             };
             Callback(data);
         }
