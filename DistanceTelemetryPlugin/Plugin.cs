@@ -10,10 +10,8 @@ using Events.RaceEnd;
 using JsonFx.Json;
 using System;
 using System.Diagnostics;
-using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
-using System.Runtime.Serialization.Formatters.Binary;
 using UnityEngine;
 
 namespace DistanceTelemetryPlugin
@@ -44,11 +42,12 @@ namespace DistanceTelemetryPlugin
         private bool has_wings;
         private bool wings;
         private CarLogic car_log;
-        private Dictionary<string, object> data;
+        private Telemetry data;
         private FileSystem fs = new FileSystem();
         private Guid instance_id;
         private Guid race_id;
         private JsonWriter writer = new JsonWriter();
+        
         private LocalPlayerControlledCar localCar;
         private NetworkStream udpStream;
         private PlayerEvents playerEvents;
@@ -65,7 +64,6 @@ namespace DistanceTelemetryPlugin
         //Unity MonoBehaviour Functions
         private void Awake()
         {
-            TcpClient tClient = new TcpClient();
             
             if (Instance == null)
             {
@@ -140,118 +138,81 @@ namespace DistanceTelemetryPlugin
                 if (!localCar.ExistsAndIsEnabled())
                 {
                     localCar = G.Sys.PlayerManager_.localPlayers_[0].playerData_.localCar_;
+
                     Logger.LogInfo("Subscribing to events...");
                     SubscribeToEvents();
                 }
                 car_rg = localCar.GetComponent<Rigidbody>();
                 car_log = localCar.carLogic_;
 
-                data = new Dictionary<string, object>
+                data = new UpdateTelemetry
                 {
-                    ["Level"] = G.Sys.GameManager_.LevelName_,
-                    ["Mode"] = G.Sys.GameManager_.ModeName_,
-                    ["Real Time"] = DateTime.Now,
-                    ["Time"] = sw.Elapsed.TotalSeconds,
-                    ["Event"] = "update",
-                    ["Speed_KPH"] = localCar.carStats_.GetKilometersPerHour(),
-                    ["Speed_MPH"] = localCar.carStats_.GetMilesPerHour(),
-                    ["Heat"] = car_log.heat_
+                    Level = G.Sys.GameManager_.LevelName_,
+                    Mode = G.Sys.GameManager_.ModeName_,
+                    RealTime = DateTime.Now,
+                    Time = sw.Elapsed.TotalSeconds,
+                    Speed_KPH = localCar.carStats_.GetKilometersPerHour(),
+                    Speed_MPH = localCar.carStats_.GetMilesPerHour(),
+                    Heat = car_log.heat_,
+                    Pos = new Vector3(localCar.transform.position.x, localCar.transform.position.y, localCar.transform.position.z),
+                    Rot = new Vector3(localCar.transform.rotation.x, localCar.transform.rotation.y, localCar.transform.rotation.z),
+                    Vel = new Vector3(car_rg.velocity.x, car_rg.velocity.y, car_rg.velocity.z),
+                    AngVel = new Vector3(car_rg.angularVelocity.x, car_rg.angularVelocity.y, car_rg.angularVelocity.z),
+                    Inputs = new Inputs
+                    {
+                        Boost = car_log.CarDirectives_.Boost_,
+                        Steer = car_log.CarDirectives_.Steer_,
+                        Grip = car_log.CarDirectives_.Grip_,
+                        Gas = car_log.CarDirectives_.Gas_,
+                        Brake = car_log.CarDirectives_.Brake_,
+                        Rotation = new Vector3(car_log.CarDirectives_.Rotation_.x, car_log.CarDirectives_.Rotation_.y, car_log.CarDirectives_.Rotation_.z)
+                    },
+                    Grav = car_rg.useGravity,
+                    Drag = car_rg.drag,
+                    AngularDrag = car_rg.angularDrag,
+                    Wings = localCar.WingsActive_,
+                    HasWings = localCar.WingsEnabled_,
+                    AllWheelsContacting = car_log.CarStats_.AllWheelsContacting_,
+                    Tires = new Tires
+                    {
+                        TireFL = new Tire
+                        {
+                            Pos = car_log.CarStats_.WheelFL_.hubTrans_.position.y,
+                            Contact = car_log.CarStats_.WheelFL_.IsInContact_,
+                            Suspension = car_log.CarStats_.WheelFL_.SuspensionDistance_
+                        },
+                        TireFR = new Tire
+                        {
+                            Pos = car_log.CarStats_.WheelFR_.hubTrans_.position.y,
+                            Contact = car_log.CarStats_.WheelFR_.IsInContact_,
+                            Suspension = car_log.CarStats_.WheelFR_.SuspensionDistance_
+                        },
+                        TireBL = new Tire
+                        {
+                            Pos = car_log.CarStats_.WheelBL_.hubTrans_.position.y,
+                            Contact = car_log.CarStats_.WheelBL_.IsInContact_,
+                            Suspension = car_log.CarStats_.WheelBL_.SuspensionDistance_
+                        },
+                        TireBR = new Tire
+                        {
+                            Pos = car_log.CarStats_.WheelBR_.hubTrans_.position.y,
+                            Contact = car_log.CarStats_.WheelBR_.IsInContact_,
+                            Suspension = car_log.CarStats_.WheelBR_.SuspensionDistance_
+                        }
+                    },
+                    DriveWheelAvgRotVel = car_log.CarStats_.DriveWheelAvgRotVel_,
+                    DriveWheelAvgRPM = car_log.CarStats_.DriveWheelAvgRPM_
                 };
-                Dictionary<string, object> position = new Dictionary<string, object>
-                {
-                    ["X"] = localCar.transform.position.x,
-                    ["Y"] = localCar.transform.position.y,
-                    ["Z"] = localCar.transform.position.z
-                };
-                Dictionary<string, object> rotation = new Dictionary<string, object>
-                {
-                    ["X"] = localCar.transform.rotation.x,
-                    ["Y"] = localCar.transform.rotation.y,
-                    ["Z"] = localCar.transform.rotation.z,
-                    ["W"] = localCar.transform.rotation.w
-                };
-                Dictionary<string, object> velocity = new Dictionary<string, object>
-                {
-                    ["X"] = car_rg.velocity.x,
-                    ["Y"] = car_rg.velocity.y,
-                    ["Z"] = car_rg.velocity.z
-                };
-                Dictionary<string, object> angular_velocity = new Dictionary<string, object>
-                {
-                    ["X"] = car_rg.angularVelocity.x,
-                    ["Y"] = car_rg.angularVelocity.y,
-                    ["Z"] = car_rg.angularVelocity.z
-                };
-                Dictionary<string, object> inputs = new Dictionary<string, object>
-                {
-                    ["Boost"] = car_log.CarDirectives_.Boost_,
-                    ["Steer"] = car_log.CarDirectives_.Steer_,
-                    ["Grip"] = car_log.CarDirectives_.Grip_,
-                    ["Gas"] = car_log.CarDirectives_.Gas_,
-                    ["Brake"] = car_log.CarDirectives_.Brake_
-                };
-                Dictionary<string, object> rotation_ctl = new Dictionary<string, object>
-                {
-                    ["X"] = car_log.CarDirectives_.Rotation_.x,
-                    ["Y"] = car_log.CarDirectives_.Rotation_.y,
-                    ["Z"] = car_log.CarDirectives_.Rotation_.z
-                };
-                Dictionary<string, object> tire_fl = new Dictionary<string, object>
-                {
-                    ["Pos"] = car_log.CarStats_.WheelFL_.hubTrans_.position.y,
-                    ["Contact"] = car_log.CarStats_.WheelFL_.IsInContact_,
-                    ["Suspension"] = car_log.CarStats_.WheelFL_.SuspensionDistance_
-                };
-                Dictionary<string, object> tire_fr = new Dictionary<string, object>
-                {
-                    ["Pos"] = car_log.CarStats_.WheelFR_.hubTrans_.position.y,
-                    ["Contact"] = car_log.CarStats_.WheelFR_.IsInContact_,
-                    ["Suspension"] = car_log.CarStats_.WheelFR_.SuspensionDistance_
-                };
-                Dictionary<string, object> tire_bl = new Dictionary<string, object>
-                {
-                    ["Pos"] = car_log.CarStats_.WheelBL_.hubTrans_.position.y,
-                    ["Contact"] = car_log.CarStats_.WheelBL_.IsInContact_,
-                    ["Suspension"] = car_log.CarStats_.WheelBL_.SuspensionDistance_
-                };
-                Dictionary<string, object> tire_br = new Dictionary<string, object>
-                {
-                    ["Pos"] = car_log.CarStats_.WheelBR_.hubTrans_.position.y,
-                    ["Contact"] = car_log.CarStats_.WheelBR_.IsInContact_,
-                    ["Suspension"] = car_log.CarStats_.WheelBR_.SuspensionDistance_
-                };
-                Dictionary<string, object> tires = new Dictionary<string, object>
-                {
-                    ["TireFL"] = tire_fl,
-                    ["TireFR"] = tire_fr,
-                    ["TireBL"] = tire_bl,
-                    ["TireBR"] = tire_br
-                };
-                data["Pos"] = position;
-                data["Rot"] = rotation;
-                data["Vel"] = velocity;
-                data["Ang Vel"] = angular_velocity;
-                inputs["Rotation"] = rotation_ctl;
-                data["Inputs"] = inputs;
-                data["Grav"] = car_rg.useGravity;
-                data["Drag"] = car_rg.drag;
-                data["Angular Drag"] = car_rg.angularDrag;
-                data["Wings"] = localCar.WingsActive_;
-                data["Has Wings"] = localCar.WingsEnabled_;
-                data["All Wheels Contacting"] = car_log.CarStats_.AllWheelsContacting_;
-                data["Tires"] = tires;
-                data["Drive Wheel AVG Rot Vel"] = car_log.CarStats_.DriveWheelAvgRotVel_;
-                data["Drive Wheel AVG RPM"] = car_log.CarStats_.DriveWheelAvgRPM_;
 
                 Callback(data);
             }
         }
 
         //Normal Functions
-        public void Callback(Dictionary<string, object> data)
+        public void Callback(Telemetry data)
         {
-            data["Sender_ID"] = instance_id.ToString("B");
-            data["Race_ID"] = race_id.ToString("B");
+            data.Sender_ID = instance_id.ToString("B");
+            data.Race_ID = race_id.ToString("B");
 
             //Checking whether or not it's connected to the host. Attempts a reconnect before continuing. 
             if (!oClient.Client.Connected)
@@ -261,12 +222,15 @@ namespace DistanceTelemetryPlugin
                     Logger.LogInfo("[Telemetry] Reconnecting...");
                     if (TryConnectToHost())
                     {
-                        using (MemoryStream ms = new MemoryStream())
+                        using (var ms = new MemoryStream())
                         {
-                            BinaryFormatter binFormatter = new BinaryFormatter();
-                            binFormatter.Serialize(ms, data);
-                            byte[] dicBytes = ms.ToArray();
-                            oClient.Send(dicBytes, dicBytes.Length);
+                            using (var bw = new BinaryWriter(ms))
+                            {
+                                bw.Write(writer.Write(data));
+
+                                byte[] dicBytes = ms.ToArray();                                
+                                oClient.Send(dicBytes, dicBytes.Length);
+                            }
                         }
                     }
                 }
@@ -276,190 +240,160 @@ namespace DistanceTelemetryPlugin
                     writer.Write(data, data_writer);
                     data_writer.WriteLine();
                     data_writer.Flush();
+
                 }
             }
             else
             {
-                using (MemoryStream ms = new MemoryStream())
+                using (var ms = new MemoryStream())
                 {
-                    BinaryFormatter binFormatter = new BinaryFormatter();
-                    binFormatter.Serialize(ms, data);
-                    byte[] dicBytes = ms.ToArray();
-                    oClient.Send(dicBytes, dicBytes.Length);
+                    using (var bw = new BinaryWriter(ms))
+                    {
+                        bw.Write(writer.Write(data));
+
+                        byte[] dicBytes = ms.ToArray();
+                        oClient.Send(dicBytes, dicBytes.Length);
+                    }
                 }
             }
         }
 
         private void LocalVehicle_CheckpointPassed(CheckpointHit.Data eventData)
         {
-            data = new Dictionary<string, object>
+            data = new CheckpointTelmetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Time"] = sw.Elapsed.TotalSeconds,
-                ["Event"] = "checkpoint",
-                ["Checkpoint Index"] = eventData.handle_,
-                ["TrackT"] = eventData.trackT_
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds,
+                CheckpointIndex = eventData.handle_.id_,
+                TrackT = eventData.trackT_
             };
             Callback(data);
         }
 
         private void LocalVehicle_Collided(Impact.Data eventData)
         {
-            data = new Dictionary<string, object>
+            data = new CollisionTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Time"] = sw.Elapsed.TotalSeconds,
-                ["Event"] = "collision",
-                ["Target"] = eventData.impactedCollider_.name
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds,
+                Target = eventData.impactedCollider_.name,
+                Pos = new Vector3(eventData.pos_.x, eventData.pos_.y, eventData.pos_.z),
+                Speed = eventData.speed_
             };
-            Dictionary<string, object> position = new Dictionary<string, object>
-            {
-                ["X"] = eventData.pos_.x,
-                ["Y"] = eventData.pos_.y,
-                ["Z"] = eventData.pos_.z
-            };
-            data["Pos"] = position;
-            data["Speed"] = eventData.speed_;
             Callback(data);
         }
 
         private void LocalVehicle_Destroyed(Death.Data eventData)
         {
-            data = new Dictionary<string, object>
+            data = new ExplodedDestroyedTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Time"] = sw.Elapsed.TotalSeconds,
-                ["Event"] = "destroyed",
-                ["Cause"] = eventData.causeOfDeath
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds,
+                Cause = eventData.causeOfDeath
             };
             Callback(data);
         }
 
         private void LocalVehicle_Exploded(Explode.Data eventData)
         {
-            data = new Dictionary<string, object>
+            data = new ExplodedDestroyedTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Time"] = sw.Elapsed.TotalSeconds,
-                ["Event"] = "exploded",
-                ["Cause"] = eventData.causeOfDeath
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds,
+                Cause = eventData.causeOfDeath
             };
             Callback(data);
         }
 
         private void LocalVehicle_Honked(Horn.Data eventData)
         {
-            data = new Dictionary<string, object>
+            data = new HonkedTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Time"] = sw.Elapsed.TotalSeconds,
-                ["Event"] = "honked",
-                ["Power"] = eventData.hornPercent_
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds,
+                Power = eventData.hornPercent_,
+                Pos = new Vector3(eventData.position_.x, eventData.position_.y, eventData.position_.z)
             };
-            Dictionary<string, object> position = new Dictionary<string, object>
-            {
-                ["X"] = eventData.position_.x,
-                ["Y"] = eventData.position_.y,
-                ["Z"] = eventData.position_.z
-            };
-            data["Pos"] = position;
             Callback(data);
         }
 
         private void LocalVehicle_Finished(Events.Player.Finished.Data eventData)
         {
-            data = new Dictionary<string, object>
+            data = new FinishTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Time"] = sw.Elapsed.TotalSeconds,
-                ["Event"] = "finish",
-                ["Final Time"] = eventData.finishData_,
-                ["Finish Type"] = eventData.finishType_
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds,
+                FinalTime = eventData.finishData_,
+                FinishType = eventData.finishType_
             };
             Callback(data);
         }
 
         private void LocalVehicle_Jumped(Jump.Data eventData)
         {
-            data = new Dictionary<string, object>
+            data = new JumpTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Time"] = sw.Elapsed.TotalSeconds,
-                ["Event"] = "jump"
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds,
             };
             Callback(data);
         }
 
         private void LocalVehicle_Respawn(CarRespawn.Data eventData)
         {
-            data = new Dictionary<string, object>
+            data = new RespawnTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Time"] = sw.Elapsed.TotalSeconds,
-                ["Event"] = "respawn"
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds,                
+                Pos = new Vector3(eventData.position_.x, eventData.position_.y, eventData.position_.z),
+                Rot = new Vector3(eventData.rotation_.eulerAngles.x, eventData.rotation_.eulerAngles.y, eventData.rotation_.eulerAngles.z)
             };
-            Dictionary<string, object> position = new Dictionary<string, object>
-            {
-                ["X"] = eventData.position_.x,
-                ["Y"] = eventData.position_.y,
-                ["Z"] = eventData.position_.z
-            };
-            Dictionary<string, object> rotation = new Dictionary<string, object>
-            {
-                ["Pitch"] = eventData.rotation_.eulerAngles.x,
-                ["Roll"] = eventData.rotation_.eulerAngles.z,
-                ["Yaw"] = eventData.rotation_.eulerAngles.y
-            };
-            data["Pos"] = position;
-            data["Rot"] = rotation;
             Callback(data);
         }
 
         private void LocalVehicle_Split(Split.Data eventData)
         {
-            data = new Dictionary<string, object>
+            data = new SplitTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Time"] = sw.Elapsed.TotalSeconds,
-                ["Event"] = "split",
-                ["Penetration"] = eventData.penetration,
-                ["Separation Speed"] = eventData.separationSpeed
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds,                
+                Penetration = eventData.penetration,
+                SeparationSpeed = eventData.separationSpeed
             };
             Callback(data);
         }
 
         private void LocalVehicle_TrickComplete(TrickComplete.Data eventData)
         {
-            data = new Dictionary<string, object>
+            data = new TrickTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Time"] = sw.Elapsed.TotalSeconds,
-                ["Event"] = "trick",
-                ["Points"] = eventData.points_,
-                ["Cooldown"] = eventData.cooldownAmount_,
-                ["Grind"] = eventData.grindMeters_,
-                ["Wallride"] = eventData.wallRideMeters_,
-                ["Ceiling"] = eventData.ceilingRideMeters_
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds,                
+                Points = eventData.points_,
+                Cooldown = eventData.cooldownAmount_,
+                Grind = eventData.grindMeters_,
+                Wallride = eventData.wallRideMeters_,
+                Ceiling = eventData.ceilingRideMeters_
             };
             Callback(data);
         }
@@ -491,13 +425,12 @@ namespace DistanceTelemetryPlugin
             }
             sw = Stopwatch.StartNew();
             active = true;
-            data = new Dictionary<string, object>
+            data = new RaceStartedTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Event"] = "start",
-                ["Time"] = sw.Elapsed.TotalSeconds
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds
             };
             Callback(data);
         }
@@ -505,18 +438,20 @@ namespace DistanceTelemetryPlugin
         private void RaceEnded(LocalCarHitFinish.Data eventData)
         {
             Log.LogInfo("{Telemetry] Finished...");
-            data = new Dictionary<string, object>
+            data = new RaceEndedTelemetry
             {
-                ["Level"] = G.Sys.GameManager_.LevelName_,
-                ["Mode"] = G.Sys.GameManager_.ModeName_,
-                ["Real Time"] = DateTime.Now,
-                ["Event"] = "end",
-                ["Time"] = sw.Elapsed.TotalSeconds
+                Level = G.Sys.GameManager_.LevelName_,
+                Mode = G.Sys.GameManager_.ModeName_,
+                RealTime = DateTime.Now,
+                Time = sw.Elapsed.TotalSeconds
             };
             sw.Stop();
             active = false;
             Callback(data);
         }
+
+              
+        
 
         private void SubscribeToEvents()
         {
@@ -531,6 +466,20 @@ namespace DistanceTelemetryPlugin
             playerEvents.Subscribe(new InstancedEvent<Events.Player.Finished.Data>.Delegate(LocalVehicle_Finished));
             playerEvents.Subscribe(new InstancedEvent<Explode.Data>.Delegate(LocalVehicle_Exploded));
             playerEvents.Subscribe(new InstancedEvent<Horn.Data>.Delegate(LocalVehicle_Honked));
+        }
+
+        private void UnSubscribeFromEvents()
+        {
+            playerEvents.Unsubscribe(new InstancedEvent<TrickComplete.Data>.Delegate(LocalVehicle_TrickComplete));
+            playerEvents.Unsubscribe(new InstancedEvent<Split.Data>.Delegate(LocalVehicle_Split));
+            playerEvents.Unsubscribe(new InstancedEvent<CheckpointHit.Data>.Delegate(LocalVehicle_CheckpointPassed));
+            playerEvents.Unsubscribe(new InstancedEvent<Impact.Data>.Delegate(LocalVehicle_Collided));
+            playerEvents.Unsubscribe(new InstancedEvent<Death.Data>.Delegate(LocalVehicle_Destroyed));
+            playerEvents.Unsubscribe(new InstancedEvent<Jump.Data>.Delegate(LocalVehicle_Jumped));
+            playerEvents.Unsubscribe(new InstancedEvent<CarRespawn.Data>.Delegate(LocalVehicle_Respawn));
+            playerEvents.Unsubscribe(new InstancedEvent<Events.Player.Finished.Data>.Delegate(LocalVehicle_Finished));
+            playerEvents.Unsubscribe(new InstancedEvent<Explode.Data>.Delegate(LocalVehicle_Exploded));
+            playerEvents.Unsubscribe(new InstancedEvent<Horn.Data>.Delegate(LocalVehicle_Honked));
         }
 
         private bool TryConnectToHost()
@@ -555,4 +504,6 @@ namespace DistanceTelemetryPlugin
             return false;
         }
     }
+    
+    
 }
