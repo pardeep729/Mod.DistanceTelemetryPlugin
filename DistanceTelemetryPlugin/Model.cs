@@ -1,7 +1,4 @@
-﻿using Newtonsoft.Json.Converters;
-using Newtonsoft.Json;
-
-using System;
+﻿using System;
 
 using UnityEngine;
 
@@ -9,7 +6,7 @@ using static Events.Car.Death;
 
 namespace DistanceTelemetryPlugin
 {
-    
+
     public enum TelemetryEvent
     {
         Update,
@@ -52,13 +49,12 @@ namespace DistanceTelemetryPlugin
         public Tire TireBR;
     }
 
-    
+
 
     public abstract class Telemetry
     {
         public string Sender_ID;
         public string Race_ID;
-        [JsonConverter(typeof(StringEnumConverter))]
         public abstract TelemetryEvent Event { get; }
         public string Level;
         public string Mode;
@@ -91,10 +87,10 @@ namespace DistanceTelemetryPlugin
         public float DriveWheelAvgRotVel;
         public float DriveWheelAvgRPM;
 
-        
+
     }
 
-    public class CheckpointTelmetry : Telemetry 
+    public class CheckpointTelmetry : Telemetry
     {
 
         public override TelemetryEvent Event => TelemetryEvent.Checkpoint;
@@ -110,13 +106,11 @@ namespace DistanceTelemetryPlugin
         public float Speed;
     }
 
-    
+
 
     public class ExplodedDestroyedTelemetry : Telemetry
     {
         public override TelemetryEvent Event => TelemetryEvent.Exploded;
-
-        [JsonConverter(typeof(StringEnumConverter))]
         public Cause Cause;
     }
 
@@ -131,7 +125,7 @@ namespace DistanceTelemetryPlugin
     {
         public override TelemetryEvent Event => TelemetryEvent.Finish;
         public int FinalTime;
-        
+
         public FinishType FinishType;
     }
 
