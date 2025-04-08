@@ -8,12 +8,16 @@ using Events.GameMode;
 using Events.Player;
 using Events.RaceEnd;
 using Events.Scene;
+using HarmonyLib;
 using JsonFx.Json;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
+using System.Reflection;
+using System.Threading;
 using UnityEngine;
 
 namespace DistanceTelemetryPlugin
@@ -30,11 +34,13 @@ namespace DistanceTelemetryPlugin
         public static string FilePrefixKey = "File Prefix";
         public static string UdpHostKey = "UDP Host";
         public static string UdpPortKey = "UDP Port";
+        public static string WriteIntervalKey = "Write Interval (Seconds)";
 
         //Config Entries
         public static ConfigEntry<string> FilePrefix { get; set; }
         public static ConfigEntry<string> UdpHost { get; set; }
         public static ConfigEntry<int> UdpPort { get; set; }
+        public static ConfigEntry<float> WriteInterval { get; set; }
 
         //Public Variables
         public bool active = false;
@@ -43,6 +49,8 @@ namespace DistanceTelemetryPlugin
 
         //Private Variables
         private CarLogic car_log;
+        private CarStats car_stats;
+        private bool wingsEnabled;
         private Dictionary<string, object> data;
         private FileSystem fs = new FileSystem();
         FileStream fileStream;
@@ -60,6 +68,10 @@ namespace DistanceTelemetryPlugin
         //Other
         public static ManualLogSource Log;
         public static Mod Instance;
+        private readonly Queue<Dictionary<string, object>> telemetryQueue = new Queue<Dictionary<string, object>>();
+        private readonly object queueLock = new object();
+        private Thread fileWriterThread;
+        private bool isRunning = true;
 
         public Mod()
         {
@@ -99,6 +111,10 @@ namespace DistanceTelemetryPlugin
                 12345,
                 new ConfigDescription("The port number to connect to for streaming data over UDP (-1 to disable UDP streaming, defaults to 12345)"));
 
+            WriteInterval = Config.Bind("General",
+                WriteIntervalKey,
+                1.0f, // Default 1 second
+                new ConfigDescription("How often to write telemetry data in seconds (e.g., 1.0 = once every second)"));
             //Tries to connect to host, if it can't then it outputs the telemetry to the jsonl file.
             if (!TryConnectToHost())
             {
@@ -106,20 +122,56 @@ namespace DistanceTelemetryPlugin
 
                 var logFile = Path.Combine(telemetryDirectory, $"{FilePrefix.Value}_{string.Format("{0:yyyy-MM-dd_HH-mm-ss}", DateTime.Now)}.jsonl");
                 Log.LogInfo($"[Telemetry] Writing to {logFile}...");
-                
-                fileStream = fs.CreateFile(logFile);
+
+                fileStream = new FileStream(logFile, FileMode.Create, FileAccess.Write, FileShare.Read, 4096, FileOptions.WriteThrough);
 
                 data_writer = new StreamWriter(fileStream);
-                
+
                 Logger.LogInfo($"[Telemetry] Opening new filestream for {fileStream}...");
             }
 
             UdpHost.SettingChanged += OnConfigChanged;
             UdpPort.SettingChanged += OnConfigChanged;
 
-            //Apply Patches (None to patch here!)
+            //Apply Patches
+            var harmony = new Harmony("distance.telemetryplugin.accessors");
+            harmony.PatchAll(); // Apply all Harmony patches (not actually used for field access but good to initialize anyway)
+            Logger.LogInfo("Harmony patches applied.");
+
+            StartFileWriterThread();
             Logger.LogInfo("Loaded!");
         }
+
+        /// <summary>
+        /// Starts a background thread to write telemetry data at regular intervals.
+        /// </summary>
+        private void StartFileWriterThread()
+        {
+            fileWriterThread = new Thread(() =>
+            {
+                while (isRunning)
+                {
+                    Dictionary<string, object>[] batch;
+                    lock (queueLock)
+                    {
+                        batch = telemetryQueue.ToArray();
+                        telemetryQueue.Clear();
+                    }
+
+                    foreach (var item in batch)
+                    {
+                        Callback(item);
+                    }
+
+                    // Sleep for the configured interval (convert seconds to milliseconds)
+                    Thread.Sleep((int)(WriteInterval.Value * 1000));
+                }
+            });
+
+            fileWriterThread.IsBackground = true;
+            fileWriterThread.Start();
+        }
+
 
         private void OnEnable()
         {
@@ -144,7 +196,7 @@ namespace DistanceTelemetryPlugin
             {
                 if (!localCar.ExistsAndIsEnabled())
                 {
-                    localCar = G.Sys.PlayerManager_.localPlayers_[0].playerData_.localCar_;
+                    localCar = G.Sys.PlayerManager_.LocalPlayers_[0].playerData_.LocalCar_;
 
                     if (!subscribed)
                     {
@@ -154,8 +206,9 @@ namespace DistanceTelemetryPlugin
                 }
 
                 car_rg = localCar.GetComponent<Rigidbody>();
-                car_log = localCar.carLogic_;
+                car_log = Accessors.GetCarLogic(localCar);
                 car_pyr = PitchYawRoll(localCar.transform.rotation);
+                car_stats = Accessors.GetCarStats(localCar);
 
                 data = new Dictionary<string, object>
                 {
@@ -164,9 +217,9 @@ namespace DistanceTelemetryPlugin
                     ["Real Time"] = DateTime.Now,
                     ["Time"] = sw.Elapsed.TotalSeconds,
                     ["Event"] = "update",
-                    ["Speed_KPH"] = localCar.carStats_.GetKilometersPerHour(),
-                    ["Speed_MPH"] = localCar.carStats_.GetMilesPerHour(),
-                    ["Heat"] = car_log.heat_
+                    ["Speed_KPH"] = car_stats.GetKilometersPerHour(),
+                    ["Speed_MPH"] = car_stats.GetMilesPerHour(),
+                    ["Heat"] = car_log.Heat_
                 };
                 Dictionary<string, object> position = new Dictionary<string, object>
                 {
@@ -255,64 +308,57 @@ namespace DistanceTelemetryPlugin
                 data["Drag"] = car_rg.drag;
                 data["Angular Drag"] = car_rg.angularDrag;
                 data["Wings"] = localCar.WingsActive_;
-                data["Has Wings"] = localCar.WingsEnabled_;
+                wingsEnabled = Accessors.GetWingsEnabled(localCar);
+                data["Has Wings"] = wingsEnabled;
                 data["All Wheels Contacting"] = car_log.CarStats_.AllWheelsContacting_;
                 data["Tires"] = tires;
                 data["Drive Wheel AVG Rot Vel"] = car_log.CarStats_.DriveWheelAvgRotVel_;
                 data["Drive Wheel AVG RPM"] = car_log.CarStats_.DriveWheelAvgRPM_;
 
-                Callback(data);
+                // Callback
+                lock (queueLock)
+                {
+                    telemetryQueue.Enqueue(data);
+                }
             }
         }
 
         //Normal Functions
+        /// <summary>
+        /// Callback function that is called when an event is triggered.
+        /// It sends the data to the UDP client or writes it to the file.
+        /// </summary>
+        /// <param name="data">Dictionary of data to be stored</param>
         public void Callback(Dictionary<string, object> data)
         {
             data["Sender_ID"] = instance_id.ToString("B");
             data["Race_ID"] = race_id.ToString("B");
 
-            //Checking whether or not it's connected to the host. Attempts a reconnect before continuing. 
+            writer.Settings.PrettyPrint = false;
+
+            string json = writer.Write(data);
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(json);
+
+            // Try UDP
             if (udpClient.Client.Connected)
             {
-                using (var ms = new MemoryStream())
+                udpClient.Send(bytes, bytes.Length);
+            }
+            else if (UdpPort.Value != -1 && UdpHost.Value != "")
+            {
+                Logger.LogInfo("[Telemetry] Reconnecting...");
+                if (TryConnectToHost())
                 {
-                    using (var bw = new BinaryWriter(ms))
-                    {
-                        bw.Write(writer.Write(data));
-
-                        byte[] bytes = ms.ToArray();
-                        udpClient.Send(bytes, bytes.Length);
-                    }
+                    udpClient.Send(bytes, bytes.Length);
                 }
             }
-            else
+            else if (data_writer != null && (fileStream?.CanWrite ?? false))
             {
-                if (UdpPort.Value != -1 && UdpHost.Value != "")
-                {
-                    Logger.LogInfo("[Telemetry] Reconnecting...");
-                    if (TryConnectToHost())
-                    {
-                        using (var ms = new MemoryStream())
-                        {
-                            using (var bw = new BinaryWriter(ms))
-                            {
-                                bw.Write(writer.Write(data));
-
-                                byte[] bytes = ms.ToArray();
-                                udpClient.Send(bytes, bytes.Length);
-                            }
-                        }
-                    }
-                }
-                else if (data_writer != null && (fileStream?.CanWrite ?? false)) //Write to the file
-                {
-                    writer.Settings.PrettyPrint = false;
-                    writer.Write(data, data_writer);
-                    data_writer.WriteLine();
-                    data_writer.Flush();
-                }
+                data_writer.WriteLine(json);
+                data_writer.Flush();
             }
         }
+
 
         private void LocalVehicle_CheckpointPassed(CheckpointHit.Data eventData)
         {
@@ -323,7 +369,7 @@ namespace DistanceTelemetryPlugin
                 ["Real Time"] = DateTime.Now,
                 ["Time"] = sw.Elapsed.TotalSeconds,
                 ["Event"] = "checkpoint",
-                ["Checkpoint Index"] = eventData.handle_.id_,
+                ["Checkpoint Index"] = eventData.handle_.ToString(),
                 ["TrackT"] = eventData.trackT_
             };
             Callback(data);
@@ -574,7 +620,7 @@ namespace DistanceTelemetryPlugin
 
         private void SubscribeToEvents()
         {
-            playerEvents = localCar.playerDataLocal_.Events_;
+            playerEvents = localCar.PlayerDataLocal_.Events_;
             playerEvents.Subscribe(new InstancedEvent<TrickComplete.Data>.Delegate(LocalVehicle_TrickComplete));
             playerEvents.Subscribe(new InstancedEvent<Split.Data>.Delegate(LocalVehicle_Split));
             playerEvents.Subscribe(new InstancedEvent<CheckpointHit.Data>.Delegate(LocalVehicle_CheckpointPassed));
@@ -637,6 +683,9 @@ namespace DistanceTelemetryPlugin
         {
             try
             {
+                isRunning = false;
+                fileWriterThread?.Join(); // Wait for thread to finish cleanly
+
                 fileStream?.Dispose();
                 udpClient?.Close();
                 data_writer?.Dispose();
