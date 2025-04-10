@@ -28,14 +28,14 @@ if __name__ == '__main__':
         message = data.decode('utf-8').strip()
         try:
             # Display in console
-            print(f"Received from {addr}: {message}")
+            # print(f"Received from {addr}: {message}")
 
             # Send to Event Hub
             # TODO: Send more than 1 message per batch
             batch = producer.create_batch()
             batch.add(EventData(message))
             producer.send_batch(batch)
-            print("✅ Sent to Event Hub")
+            # print("✅ Sent to Event Hub")
         except UnicodeDecodeError:
             print(f"Received non-UTF-8 data from {addr}: {data}")
         except Exception as e:
